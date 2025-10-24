@@ -1,6 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import glob
 import os
-from typing import Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 import urllib.request
 from functools import partial
 
@@ -13,9 +15,11 @@ import torch
 import pickle
 from torch.utils.data import DataLoader
 import h5py
+from tqdm import tqdm
 
 from ..instrument import Instrument, get_skyline_mask
 from ..util import BatchedFilesDataset, interp1d, load_batch
+from .download_utils import _make_session, _download_one
 
 
 class DESI(Instrument):
@@ -27,7 +31,7 @@ class DESI(Instrument):
 
     _wave_obs = torch.linspace(3600.0, 9824.0, 7781, dtype=torch.float64)
     _skyline_mask = get_skyline_mask(_wave_obs)
-    _base_url = "https://data.desi.lbl.gov/public/edr/spectro/redux/fuji/"  # this should be public on Tuesday
+    _base_url = "https://data.desi.lbl.gov/public/dr1/spectro/redux/iron/"
 
     def __init__(self, lsf=None, calibration=None):
         """Create instrument
@@ -170,36 +174,106 @@ class DESI(Instrument):
         None
 
         """
-        counter, new_batch = 0, True
-        for _id in ids:
-            survey, prog, hpix, target = _id
+        # rolling buffers
+        buf_spec: List[torch.tensor] = []
+        buf_w: List[torch.tensor] = []
+        buf_z: List[torch.tensor] = []
+        buf_target_id: List[torch.tensor] = []
+        buf_norm: List[torch.tensor] = []
+        buf_zerr: List[torch.tensor] = []
 
-            f = cls.get_spectra(dir, survey, prog, hpix, return_file=True)
+        # number of spectra in buffer
+        curr = 0
 
-            spec, w, z, target_id, norm, zerr = cls.prepare_spectra(f, target=target)
-            if new_batch: 
-                batches = [spec, w, z, target_id, norm, zerr]
-            else: 
-                batches[0] = torch.concatenate([batch[0], spec], axis=0)
-                batches[1] = torch.concatenate([batch[1], w], axis=0)
-                batches[2] = torch.concatenate([batch[2], z], axis=0)
-                batches[3] = torch.concatenate([batch[3], target_id], axis=0)
-                batches[4] = torch.concatenate([batch[4], norm], axis=0)
-                batches[5] = torch.concatenate([batch[5], zerr], axis=0)
-            
-            N = batches[0].shape[0]
-            while N > batch_size:
-                batch = [_batch[:batch_size] for _batch in batches]
+        # batch counter
+        counter = 0
 
-                print(f"saving batch {counter}")
-                cls.save_batch(dir, batch, tag=tag, counter=counter)
-                counter += 1
-                N -= batch_size
+        def flush_batch():
+            nonlocal buf_spec, buf_w, buf_z, buf_target_id, buf_norm, buf_zerr
+            nonlocal curr, counter
 
-                batches = [_batch[batch_size:] for _batch in batches]
+            # only concatenate during the flush to save memory and then split
+            # into [batch, reminder]
+            S = torch.cat(buf_spec, dim=0) if len(buf_spec) > 1 else buf_spec[0]
+            W = torch.cat(buf_w, dim=0) if len(buf_w) > 1 else buf_w[0]
+            Z = torch.cat(buf_z, dim=0) if len(buf_z) > 1 else buf_z[0]
+            T = (torch.cat(buf_target_id, dim=0)
+                 if len(buf_target_id) > 1 else buf_target_id[0])
+            N = torch.cat(buf_norm, dim=0) if len(buf_norm) > 1 else buf_norm[0]
+            E = torch.cat(buf_zerr, dim=0) if len(buf_zerr) > 1 else buf_zerr[0]
+
+            batch = [
+                S[:batch_size],
+                W[:batch_size],
+                Z[:batch_size],
+                T[:batch_size],
+                N[:batch_size],
+                E[:batch_size],
+            ]
+
+            # save the batch
+            print(f"saving batch {counter}")
+            cls.save_batch(dir, batch, tag=tag, counter=counter)
+            counter += 1
+
+            # reminder
+            rem_S = S[batch_size:]
+            rem_W = W[batch_size:]
+            rem_Z = Z[batch_size:]
+            rem_T = T[batch_size:]
+            rem_N = N[batch_size:]
+            rem_E = E[batch_size:]
+
+            buf_spec = [rem_S] if rem_S.numel() else []
+            buf_w = [rem_W] if rem_W.numel() else []
+            buf_z = [rem_Z] if rem_Z.numel() else []
+            buf_target_id = [rem_T] if rem_T.numel() else []
+            buf_norm = [rem_N] if rem_N.numel() else []
+            buf_zerr = [rem_E] if rem_E.numel() else []
+            curr = rem_S.shape[0] if rem_S.numel() else 0
+            print(f"flushed batch, {curr} spectra remain in buffer")
+        
+        for survey, program, hpix, target in tqdm(ids, desc="Processing healpix"):
+            coadd_file = cls.get_spectra(dir, survey, program, hpix, return_file=True)
+            spec, w, z, target_id, norm, zerr = cls.prepare_spectra(
+                coadd_file, target=target
+            )
+
+            n_spec = spec.shape[0]
+            print(f"hpix {hpix}: got {n_spec} spectra")
+
+            if n_spec == 0:
+                continue
+
+            buf_spec.append(spec)
+            buf_w.append(w)
+            buf_z.append(z)
+            buf_target_id.append(target_id)
+            buf_norm.append(norm)
+            buf_zerr.append(zerr)
+            curr += n_spec
+
+            # flush buffer if needed
+            while curr >= batch_size:
+                flush_batch()
+        
+        # flush remaining spectra
+        if curr > 0:
+            # Concatenate remaining spectra
+            S = torch.cat(buf_spec, dim=0) if len(buf_spec) > 1 else buf_spec[0]
+            W = torch.cat(buf_w, dim=0) if len(buf_w) > 1 else buf_w[0]
+            Z = torch.cat(buf_z, dim=0) if len(buf_z) > 1 else buf_z[0]
+            T = (torch.cat(buf_target_id, dim=0)
+                 if len(buf_target_id) > 1 else buf_target_id[0])
+            N = torch.cat(buf_norm, dim=0) if len(buf_norm) > 1 else buf_norm[0]
+            E = torch.cat(buf_zerr, dim=0) if len(buf_zerr) > 1 else buf_zerr[0]
+
+            batch = [S, W, Z, T, N, E]
+            print(f"saving final batch {counter} with {curr} spectra")
+            cls.save_batch(dir, batch, tag=tag, counter=counter)
 
     @classmethod
-    def get_spectra(cls, dir, survey, prog, hpix, return_file=False):
+    def get_spectra(cls, dir, survey, prog, hpix, return_file=False, max_workers=8):
         """Download and prepare spectrum for analysis
 
         Parameters
@@ -214,34 +288,64 @@ class DESI(Instrument):
             healipx number
         return_file: bool
             Whether to return the local file name or the prepared spectrum
+        max_workers: int
+            Number of parallel download workers for the server
 
         Returns
         -------
         Either the local file name or the prepared spectrum
         """
 
-        for ftype in ["redrock", "rrdetails", "emline", "qso_mgii", "qso_qn", "coadd"]:
-            filename = "%s-%s-%s-%i.fits" % (ftype, survey, prog, hpix)
-            if ftype == 'rrdetails': filename = filename.replace('.fits', '.h5')
-            dirname = os.path.join(dir, str(hpix))
-            flocal = os.path.join(dirname, filename)
-            # download spectra file
-            if not os.path.isfile(flocal):
-                os.makedirs(dirname, exist_ok=True)
-                url = "%s/healpix/%s/%s/%s/%i/%s" % (
-                    cls._base_url,
-                    survey,
-                    prog,
-                    str(hpix)[:-2],
-                    hpix,
-                    filename,
-                )
-                print(f"downloading {url}")
-                urllib.request.urlretrieve(url, flocal)
+        ftypes = ["redrock", "rrdetails", "emline", "qso_mgii", "qso_qn", "coadd"]
+        dirname = Path(dir) / str(hpix)
 
+        plan = []
+        local_paths: Dict[str, Path] = {}
+
+        session = _make_session()
+
+        for ftype in ftypes:
+            filename = f"{ftype}-{survey}-{prog}-{hpix}.fits"
+            if ftype == 'rrdetails': filename = filename.replace('.fits', '.h5')
+            
+            flocal = dirname / filename
+
+            url = (
+                f"{cls._base_url}/healpix/{survey}/{prog}/{str(hpix)[:-2]}/{hpix}/{filename}"
+            )
+
+            # Only queue downloads we need; keep already-present paths in out_paths
+            local_paths[ftype] = flocal
+            if not flocal.exists():
+                plan.append((ftype, url, flocal))
+
+        total = len(ftypes)
+        completed = total - len(plan)
+
+        with tqdm(total=total, desc="Downloading", leave=True) as pbar:
+            pbar.update(completed)
+
+            # Kick off parallel downloads for missing files
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futures = {ex.submit(_download_one, session, url, flocal): (ftype, flocal)
+                           for (ftype, url, flocal) in plan}
+
+                for fut in as_completed(futures):
+                    ftype, flocal = futures[fut]
+                    try:
+                        path_str, _ = fut.result()
+                    except Exception as e:
+                        # keep tqdm display intact
+                        tqdm.write(f"[ERROR] {ftype}: {e}")
+                        raise
+                    else:
+                        pbar.update(1)
+
+        # Preserve original return behavior
+        coadd_path = local_paths["coadd"]
         if return_file:
-            return flocal
-        return cls.prepare_spectra(flocal)
+            return str(coadd_path)
+        return cls.prepare_spectra(str(coadd_path))
 
     @classmethod
     def prepare_spectra(cls, filename, target=None, spectype='GALAXY'):
@@ -479,7 +583,7 @@ class DESI(Instrument):
         """
         main_file = os.path.join(dir, "tilepix.fits")
         if not os.path.isfile(main_file):
-            url = "https://data.desi.lbl.gov/public/edr/spectro/redux/fuji/healpix/tilepix.fits"
+            url = "%s/healpix/tilepix.fits" % (cls._base_url)
             print(f"downloading {url}")
             urllib.request.urlretrieve(url, main_file)
 

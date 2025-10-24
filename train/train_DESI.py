@@ -407,8 +407,8 @@ if __name__ == "__main__":
         print ("Restframe:\t{:.0f} .. {:.0f} A ({} bins)".format(lmbda_min, lmbda_max, bins))
 
     # data loaders
-    trainloaders = [ inst.get_data_loader(args.dir, tag="Stars", which="train",  batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
-    validloaders = [ inst.get_data_loader(args.dir,  tag="Stars", which="valid", batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
+    trainloaders = [ inst.get_data_loader(args.dir, tag="chunk1024", which="train",  batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
+    validloaders = [ inst.get_data_loader(args.dir,  tag="chunk1024", which="valid", batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
 
     # get augmentation function
     if args.augmentation:

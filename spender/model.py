@@ -344,8 +344,8 @@ class SpectrumDecoder(nn.Module):
         spectrum = interp1d(wave_redshifted, x, wave_obs)
 
         # need to zero out parts of the spectrum that our outside of the restframe range (see #34)
-        valid = (wave_obs[None,:] > self.wave_rest[0] * (1 + z[:,None]) & \
-              wave_obs[None,:] < self.wave_rest[-1] * (1 + z[:,None]))
+        valid = (wave_obs[None,:] > self.wave_rest[0] * (1 + z[:,None])) & \
+              (wave_obs[None,:] < self.wave_rest[-1] * (1 + z[:,None]))
         spectrum = spectrum.masked_fill(~valid, 0.0)
 
         # convolve with LSF

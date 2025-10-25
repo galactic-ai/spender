@@ -195,7 +195,7 @@ def checkpoint(accelerator, args, optimizer, scheduler, n_encoder, outfile, loss
 
 def load_model(filename, models, instruments):
     device = instruments[0].wave_obs.device
-    model_struct = torch.load(filename, map_location=device)
+    model_struct = torch.load(filename, map_location=device, weights_only=False)
     #wave_rest = model_struct['model'][0]['decoder.wave_rest']
     for i, model in enumerate(models):
         # backwards compat: encoder.mlp instead of encoder.mlp.mlp
@@ -361,7 +361,7 @@ def train(models,
             mem_report()
             losses = tuple(detailed_loss[0, :, epoch_, :])
             vlosses = tuple(detailed_loss[1, :, epoch_, :])
-            print('====> Epoch: %i'%(epoch))
+            print('====> Epoch: %i'%(epoch_))
             print('TRAINING Losses:', losses)
             print('VALIDATION Losses:', vlosses)
 

@@ -16,6 +16,9 @@ from spender.util import mem_report, resample_to_restframe
 # allows one to run fp16_train.py from home directory
 import sys;sys.path.insert(1, './')
 
+def base(m):
+    return m.module if hasattr(m, "module") else m
+
 def prepare_train(seq,niter=800):
     for d in seq:
         if not "iteration" in d:d["iteration"]=niter
@@ -37,9 +40,10 @@ def get_all_parameters(models,instruments):
     model_params = []
     # multiple encoders
     for model in models:
-        model_params += model.encoder.parameters()
+        m = base(model)
+        model_params += m.encoder.parameters()
     # 1 decoder
-    model_params += model.decoder.parameters()
+    model_params += base(models[0]).decoder.parameters()
     dicts = [{'params':model_params}]
 
     n_parameters = sum([p.numel() for p in model_params if p.requires_grad])
@@ -65,8 +69,9 @@ def consistency_loss(s, s_aug, individual=False):
     return sim_loss.sum()
 
 def similarity_loss(instrument, model, spec, w, z, s, slope=0.5, individual=False, wid=5, amp=3):
+    m = base(model)
     spec,w = resample_to_restframe(instrument.wave_obs,
-                                   model.decoder.wave_rest,
+                                   m.decoder.wave_rest,
                                    spec,w,z)
 
     batch_size, spec_size = spec.shape
@@ -104,18 +109,20 @@ def similarity_loss(instrument, model, spec, w, z, s, slope=0.5, individual=Fals
     return amp*sim_loss.sum() / batch_size
 
 def restframe_weight(model,mu=5000,sigma=2000,amp=30):
-    x = model.decoder.wave_rest
+    m = base(model)
+    x = m.decoder.wave_rest
     return amp*torch.exp(-(0.5*(x-mu)/sigma)**2)
 
 def similarity_restframe(instrument, model, s=None, slope=1.0,
                          individual=False, wid=5, bound=[4000,7000]):
+    m = base(model)
     _, s_size = s.shape
     device = s.device
 
-    spec = model.decode(s)
-    wave = model.decoder.wave_rest
+    spec = m.decode(s)
+    wave = m.decoder.wave_rest
     mask = (wave>bound[0])*(wave<bound[1])
-    spec /= spec[:,mask].median(dim=1)[0][:,None]
+    spec = spec / spec[:,mask].median(dim=1)[0][:,None]
     batch_size, spec_size = spec.shape
     # pairwise dissimilarity of spectra
     S = (spec[None,:,:] - spec[:,None,:])**2
@@ -149,9 +156,10 @@ def _losses(model,
 
     spec, w, z = batch
     # need the latents later on if similarity=True
-    s = model.encode(spec)
+    m = base(model)
+    s = m.encode(spec)
     if skip: return 0,0,s
-    loss = model.loss(spec, w, instrument, z=z, s=s)
+    loss = m.loss(spec, w, instrument, z=z, s=s)
 
     if similarity:
         sim_loss = similarity_restframe(instrument, model, s, slope=slope)
@@ -276,7 +284,7 @@ def train(models,
         mode = train_sequence[ladder[epoch_ - epoch]]
 
         # turn on/off model decoder
-        for p in models[0].decoder.parameters():
+        for p in base(models[0]).decoder.parameters():
             p.requires_grad = mode['decoder']
 
         slope = ANNEAL_SCHEDULE[(epoch_ - epoch)%len(ANNEAL_SCHEDULE)]
@@ -288,7 +296,7 @@ def train(models,
         for which in range(n_encoder):
 
             # turn on/off encoder
-            for p in models[which].encoder.parameters():
+            for p in base(models[which]).encoder.parameters():
                 p.requires_grad = mode['encoder'][which]
 
             # optional: training on single dataset

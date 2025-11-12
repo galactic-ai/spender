@@ -1,176 +1,130 @@
-#!/usr/bin/env python
-
-import argparse
+import os
 import torch
-from torch.utils.data import DataLoader, TensorDataset
-from sbi.neural_nets.net_builders import build_nsf
-import torch.optim as optim
+import optuna
 
-def main(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+from sbi.inference import SNPE
+from sbi.neural_nets import posterior_nn
+from sbi.utils import BoxUniform
 
-    data = torch.load(args.latent_file, map_location="cpu")
-    theta = data["latents"].float()   # [N, S]
-    A     = data["A"].float()         # [N, 1]
+from torch.utils.tensorboard.writer import SummaryWriter
 
-    print("Loaded latents:", theta.shape)
-    print("Loaded A:", A.shape)
+class NPEOptunaTraining:
+    # USAGE:
+    # npe = NPEOptunaTraining(y, x, n_trials, study_name, output_dir, n_jobs, device)
+    # study = npe()
+    # theta = [N, S]
+    # x = A = [N, 1]
+    def __init__(self, theta, A, 
+                study_name,
+                output_dir,
+                n_trials=30, 
+                n_jobs=1,
+                device='cpu',
+                val_frac=0.2,
+                seed = 42
+                ):
+       
+        self.theta = theta.float().to(device)
+        self.A = A.float().to(device)
+        self.S = self.theta.shape[1]
+        self.device = torch.device(device)
+        self.study_name = study_name
+        self.output_dir = output_dir
+        self.n_trials = n_trials
+        self.n_jobs = n_jobs
+        self.val_frac = val_frac
+        self.seed = seed
 
-    # standarise
-    theta_mean = theta.mean(0, keepdim=True)
-    theta_std  = theta.std(0, keepdim=True) + 1e-6
-    theta = (theta - theta_mean) / theta_std
+        os.makedirs(os.path.join(self.output_dir, self.study_name), exist_ok=True)
+        self.storage = f"sqlite:///{output_dir}/{study_name}/{study_name}.db"
 
-    A_mean = A.mean(0, keepdim=True)
-    A_std  = A.std(0, keepdim=True) + 1e-6
-    A = (A - A_mean) / A_std
+        th_min = self.theta.min(dim=0).values - 3.0
+        th_max = self.theta.max(dim=0).values + 3.0
+        self.prior = BoxUniform(low=th_min, high=th_max, device=self.device)
 
-    stats = {
-        "theta_mean": theta_mean,
-        "theta_std": theta_std,
-        "A_mean": A_mean,
-        "A_std": A_std,
-    }
+        # train/val split
+        N = len(self.theta)
+        g = torch.Generator(device="cpu").manual_seed(seed)
+        idx = torch.randperm(N, generator=g)
+        n_val = max(200, int(self.val_frac * N))
+        self.val_idx = idx[:n_val]
+        self.train_idx = idx[n_val:]
 
-    # dataset: (theta | A)
-    dataset = TensorDataset(theta, A)
-    N = len(dataset)
-    val_frac = 0.1
-    N_val = int(N * val_frac)
-    N_train = N - N_val
 
-    indices = torch.randperm(N)
-    train_idx = indices[:N_train]
-    val_idx = indices[N_train:]
-
-    train_loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        sampler=torch.utils.data.SubsetRandomSampler(train_idx),
-    )
-    val_loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        sampler=torch.utils.data.SubsetRandomSampler(val_idx),
-    )
-
-    # p(theta | A) flow model
-    dummy_theta, dummy_A = next(iter(train_loader))
-    density_estimator = build_nsf(
-        dummy_theta, dummy_A
-    ).to(device) # (theta | A)
-
-    optimizer = optim.Adam(density_estimator.parameters(), lr=args.lr)
-
-    best_val_loss = float("inf")
-    best_state = None
-    epoch_no_improve = 0
-
-    for epoch in range(args.epochs):
-        density_estimator.train()
-        train_loss = 0.0
-        n_train = 0
-
-        for batch_theta, batch_A in train_loader:
-            batch_theta = batch_theta.to(device)
-            batch_A = batch_A.to(device)
-
-            optimizer.zero_grad()
-            
-            loss_vec = density_estimator.loss(batch_theta, batch_A)
-            loss = loss_vec.mean()
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item() * batch_theta.size(0)
-            n_train += batch_theta.size(0)
-
-        train_loss /= max(n_train, 1)
-
-        density_estimator.eval()
-        val_loss = 0.0
-        n_val = 0
-        with torch.no_grad():
-            for batch_theta, batch_A in val_loader:
-                batch_theta = batch_theta.to(device)
-                batch_A = batch_A.to(device)
-
-                loss_vec = density_estimator.loss(batch_theta, batch_A)
-                loss = loss_vec.mean()
-                val_loss += loss.item() * batch_theta.size(0)
-                n_val += batch_theta.size(0)
-
-        val_loss /= max(n_val, 1)
-
-        print(f"Epoch {epoch:3d}: train NLL={train_loss:.4f}, val NLL={val_loss:.4f}")
-
-        # early stopping
-        if val_loss < best_val_loss - 1e-4:
-            best_val_loss = val_loss
-            best_state = {
-                "flow_state": density_estimator.state_dict(),
-                "stats": stats,
-            }
-            epoch_no_improve = 0
-        else:
-            epoch_no_improve += 1
-            if epoch_no_improve >= args.patience:
-                print("Early stopping triggered.")
-                break
-        
-    # save best model
-    if best_state is None:
-        best_state = {
-            "flow_state": density_estimator.state_dict(),
-            "stats": stats,
-        }
+        self.n_startup_trials = 20
+        self.n_blocks_min = 2 
+        self.n_blocks_max = 5
+        self.n_transf_min = 2
+        self.n_transf_max = 5
+        self.n_hidden_min = 32
+        self.n_hidden_max = 128
+        self.n_lr_min = 5e-6
+        self.n_lr_max = 1e-3
     
-    torch.save(best_state, args.outfile)
-    print(f"Saved trained flow model to {args.outfile}")
+    def objective(self, trial):
+        n_blocks = trial.suggest_int("n_blocks", self.n_blocks_min, self.n_blocks_max)
+        n_transf = trial.suggest_int("n_transf", self.n_transf_min,  self.n_transf_max)
+        n_hidden = trial.suggest_int("n_hidden", self.n_hidden_min, self.n_hidden_max, log=True)
+        lr = trial.suggest_float("lr", self.n_lr_min, self.n_lr_max, log=True)
+
+        writer = SummaryWriter('%s/%s/%s.%i' % 
+                    (self.output_dir, self.study_name, self.study_name, trial.number))
+
+        neural_posterior = posterior_nn('maf', 
+                hidden_features=n_hidden, 
+                num_transforms=n_transf, 
+                num_blocks=n_blocks, 
+                use_batch_norm=True)
+        
+        anpe = SNPE(prior=self.prior,
+                density_estimator=neural_posterior,
+                device=self.device, 
+                summary_writer=writer)
+        anpe.append_simulations(self.theta[self.train_idx], self.A[self.train_idx])
+        p_theta_x_est = anpe.train(
+                training_batch_size=512,
+                learning_rate=lr, 
+                show_train_summary=True)
+        qphi = anpe.build_posterior(density_estimator=p_theta_x_est)
+
+        save_path = os.path.join(self.output_dir, self.study_name, f"{self.study_name}.{trial.number}.pt")
+        torch.save(qphi, save_path)
+        best_valid_log_prob = anpe._summary['best_validation_log_prob'][0]
+        writer.close()
+        return -1 * best_valid_log_prob
+    
+    def run(self):
+        sampler = optuna.samplers.TPESampler(n_startup_trials=self.n_startup_trials)
+        study = optuna.create_study(study_name=self.study_name, storage=self.storage, sampler=sampler, directions=['minimize'], load_if_exists=True)
+        cb = optuna.study.MaxTrialsCallback(self.n_trials)
+
+        study.optimize(self.objective, n_trials=None, n_jobs=self.n_jobs, callbacks=[cb])
+        return study
+    
+    def __call__(self):
+        return self.run()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Train normalizing flow on noise latents"
-    )
-    parser.add_argument(
-        "latent_file",
-        type=str,
-        help="Path to latent space file (output of get_noise_latent_space.py)",
-    )
-    parser.add_argument(
-        "outfile",
-        type=str,
-        help="Output file for trained flow model",
-    )
-    parser.add_argument(
-        "-b",
-        "--batch_size",
-        type=int,
-        default=128,
-        help="Batch size for training",
-    )
-    parser.add_argument(
-        "-r",
-        "--lr",
-        type=float,
-        default=1e-3,
-        help="Learning rate",
-    )
-    parser.add_argument(
-        "-e",
-        "--epochs",
-        type=int,
-        default=100,
-        help="Maximum number of training epochs",
-    )
-    parser.add_argument(
-        "--patience",
-        type=int,
-        default=20,
-        help="Early stopping patience",
-    )
+    blob = torch.load('../spender_desi_noise_6latent_space.pt', map_location="cpu")
+    theta = blob["latents"].float()   # [N, 6]
+    A     = blob["A"].float()         # [N, 1]
 
-    args = parser.parse_args()
-    main(args)
+    trainer = NPEOptunaTraining(
+        theta=theta,
+        A=A,
+        study_name="desi_noise_flow_optuna",
+        output_dir="../optuna_studies",
+        n_trials=100,
+        n_jobs=8,
+        device='cpu',
+        val_frac=0.2,
+        seed=42
+    )
+    study = trainer()
+
+    trials_stored = sorted(study.trials, key=lambda t: t.values[0])
+    top_paths = [os.path.join(trainer.output_dir, trainer.study_name, f"{trainer.study_name}.{trial.number}.pt") for trial in trials_stored[:5]]
+    for i, path in enumerate(top_paths):
+        print(f"Top {i+1} model path: {path}")
+    

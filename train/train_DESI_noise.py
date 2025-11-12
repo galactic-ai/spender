@@ -156,6 +156,9 @@ def _losses(model,
 
     spec, w, z = batch
 
+    # clamp w to avoid infinities
+    w = torch.clamp(w, min=1e-8)
+
     # get sigma from w = ivar
     sigma = torch.sqrt(1.0 / w)
 

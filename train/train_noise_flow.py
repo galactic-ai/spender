@@ -8,6 +8,10 @@ from sbi.utils import BoxUniform
 
 from torch.utils.tensorboard.writer import SummaryWriter
 
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+torch.set_num_threads(1)
+
 class NPEOptunaTraining:
     # USAGE:
     # npe = NPEOptunaTraining(y, x, n_trials, study_name, output_dir, n_jobs, device)
@@ -67,8 +71,9 @@ class NPEOptunaTraining:
         n_hidden = trial.suggest_int("n_hidden", self.n_hidden_min, self.n_hidden_max, log=True)
         lr = trial.suggest_float("lr", self.n_lr_min, self.n_lr_max, log=True)
 
-        writer = SummaryWriter('%s/%s/%s.%i' % 
-                    (self.output_dir, self.study_name, self.study_name, trial.number))
+        # writer = SummaryWriter('%s/%s/%s.%i' % 
+        #             (self.output_dir, self.study_name, self.study_name, trial.number))
+        writer = None
 
         neural_posterior = posterior_nn('maf', 
                 hidden_features=n_hidden, 
@@ -82,7 +87,7 @@ class NPEOptunaTraining:
                 summary_writer=writer)
         anpe.append_simulations(self.theta[self.train_idx], self.A[self.train_idx])
         p_theta_x_est = anpe.train(
-                training_batch_size=512,
+                training_batch_size=2048,
                 learning_rate=lr, 
                 show_train_summary=True)
         qphi = anpe.build_posterior(density_estimator=p_theta_x_est)
@@ -95,7 +100,13 @@ class NPEOptunaTraining:
     
     def run(self):
         sampler = optuna.samplers.TPESampler(n_startup_trials=self.n_startup_trials)
-        study = optuna.create_study(study_name=self.study_name, storage=self.storage, sampler=sampler, directions=['minimize'], load_if_exists=True)
+        study = optuna.create_study(
+            study_name=self.study_name, 
+            storage=self.storage, 
+            sampler=sampler, 
+            directions='minimize', 
+            load_if_exists=True,
+        )
         cb = optuna.study.MaxTrialsCallback(self.n_trials)
 
         study.optimize(self.objective, n_trials=None, n_jobs=self.n_jobs, callbacks=[cb])
@@ -116,8 +127,8 @@ if __name__ == "__main__":
         study_name="desi_noise_flow_optuna",
         output_dir="../optuna_studies",
         n_trials=100,
-        n_jobs=8,
-        device='cpu',
+        n_jobs=1,
+        device='cuda',
         val_frac=0.2,
         seed=42
     )

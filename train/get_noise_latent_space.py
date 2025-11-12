@@ -48,7 +48,7 @@ def main(args):
     loader = inst.get_data_loader(
         args.datadir,
         tag="chunk1024",
-        which="train",
+        which="all",
         batch_size=args.batch_size,
         shuffle=False,
         shuffle_instance=False,
@@ -59,7 +59,7 @@ def main(args):
 
     with torch.no_grad():
         for i, batch in enumerate(loader):
-            spec, w, z = batch
+            spec, w, z, target_id,  norm, zerr = batch
 
             spec = spec.to(device)
             w    = w.to(device)
@@ -70,26 +70,7 @@ def main(args):
 
             s = model.encode(sigma)
             all_latents.append(s.cpu())
-
-            wave_obs = inst._wave_obs.to(device)
-
-            # restframe wavelengths
-            wave_rest = wave_obs[None, :] / (1.0 + z[:, None])
-
-            # your normalization window (same as training)
-            mask = (w > 0) & (wave_rest > 5300) & (wave_rest < 5850)
-
-            A_batch = torch.zeros(spec.size(0), 1, device=device)
-
-            for i in range(spec.size(0)):
-                sel = mask[i]
-                if sel.any():
-                    A_batch[i, 0] = spec[i, sel].median()
-                else:
-                    A_batch[i, 0] = 0.0  # or mark as bad and filter later
-
-            # save A_batch alongside latents
-            all_A.append(A_batch.cpu())
+            all_A.append(norm.unsqueeze(1).cpu())
 
             if (i + 1) % 50 == 0:
                 print(f"Processed { (i+1) * args.batch_size } spectra")

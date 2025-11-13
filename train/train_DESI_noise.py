@@ -156,24 +156,22 @@ def _losses(model,
 
     spec, w, z = batch
 
-    # clamp w to avoid infinities
-    w = torch.clamp(w, min=1e-8)
-
-    # get sigma from w = ivar
-    sigma = torch.sqrt(1.0 / w)
-
     # override z to z=0 since noise doesn't require redshift
     z_zero = torch.zeros_like(z)
 
     # need the latents later on if similarity=True
     m = base(model)
-    s = m.encode(sigma)
+    s = m.encode(w)
+
+    weight = torch.ones_like(w)
+    # mask out zero-weighted pixels
+    weight[w == 0] = 0
 
     if skip: 
         # used only for consistency loss; we still need s
         return 0,0,s
 
-    loss = m.loss(spec, w, instrument, z=z_zero, s=s)
+    loss = m.loss(w, weight, instrument, z=z_zero, s=s)
 
     # noise model doesn't use similarity
     if similarity:

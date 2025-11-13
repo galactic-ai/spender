@@ -94,8 +94,7 @@ class NPEOptunaTraining:
 
         save_path = os.path.join(self.output_dir, self.study_name, f"{self.study_name}.{trial.number}.pt")
         torch.save(qphi, save_path)
-        best_valid_log_prob = anpe._summary['best_validation_log_prob'][0]
-        writer.close()
+        best_valid_log_prob = anpe._summary["best_validation_loss"][0]
         return -1 * best_valid_log_prob
     
     def run(self):

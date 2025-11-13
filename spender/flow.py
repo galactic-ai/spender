@@ -19,6 +19,7 @@ class NeuralDensityEstimator(flows.Flow):
             num_bins: int = 10,
             embedding_net = None,
             device=None,
+            context_features: int = None,
             **kwargs):
         """
         Initialize neural density estimator.
@@ -60,6 +61,7 @@ class NeuralDensityEstimator(flows.Flow):
             hidden_features=hidden_features,
             num_transforms=num_transforms,
             embedding_net=embedding_net,
+            context_features=context_features,
             **kwargs
         )
 
@@ -72,6 +74,7 @@ def build_maf(
     num_transforms: int = 5,
     embedding_net: nn.Module = nn.Identity(),
     initial_pos: dict = {'bounds': [[1, 2], [0, 1]], 'std': [1, .05]},
+    context_features=None,
     **kwargs,
 ):
     """Builds MAF to describe p(x).
@@ -98,6 +101,7 @@ def build_maf(
                         activation=torch.tanh,
                         dropout_probability=0.0,
                         use_batch_norm=False,
+                        context_features=context_features,
                     ),
                     transforms.RandomPermutation(features=dim),
                 ]
@@ -112,9 +116,13 @@ def build_maf(
     #
     if initial_pos is not None:
         _mean = np.random.uniform(
-            low=np.array(initial_pos['bounds'])[:, 0], high=np.array(initial_pos['bounds'])[:, 1])
-        transform_init = transforms.AffineTransform(shift=torch.Tensor(-_mean) / torch.Tensor(initial_pos['std']),
-                                                    scale=1.0 / torch.Tensor(initial_pos['std']))
+            low=np.array(initial_pos['bounds'])[:, 0], 
+            high=np.array(initial_pos['bounds'])[:, 1],
+        )
+        transform_init = transforms.AffineTransform(
+            shift=torch.Tensor(-_mean) / torch.Tensor(initial_pos['std']),
+            scale=1.0 / torch.Tensor(initial_pos['std']),
+        )
         transform = transforms.CompositeTransform([transform_init, transform])
 
     distribution = distributions_.StandardNormal((dim,))

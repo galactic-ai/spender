@@ -56,6 +56,8 @@ def main(args):
 
     all_latents = []
     all_A = []
+    all_snr = []
+    all_z = []
 
     with torch.no_grad():
         for i, batch in enumerate(loader):
@@ -65,18 +67,21 @@ def main(args):
             w    = w.to(device)
             z    = z.to(device)
 
-            w = torch.clamp(w, min=1e-8)
-            sigma = torch.sqrt(1.0 / w)
+            snr = spec * torch.sqrt(w)
 
-            s = model.encode(sigma)
+            s = model.encode(snr)
             all_latents.append(s.cpu())
             all_A.append(norm.unsqueeze(1).cpu())
+            all_snr.append(snr.cpu())
+            all_z.append(z.cpu())
 
             if (i + 1) % 50 == 0:
                 print(f"Processed { (i+1) * args.batch_size } spectra")
     
     latents = torch.cat(all_latents, dim=0)
     A = torch.cat(all_A, dim=0)
+    snrs = torch.cat(all_snr, dim=0)
+    zs = torch.cat(all_z, dim=0)
 
     print("Latents shape:", latents.shape)
     print("A shape:", A.shape)
@@ -85,6 +90,9 @@ def main(args):
     out = {
         "latents": latents,
         "A": A,
+        "snrs": snrs,
+        "zs": zs,
+
     }
     torch.save(out, args.outfile)
     print(f"Saved latents to {args.outfile}")

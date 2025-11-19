@@ -14,8 +14,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # ----------------------------------------------------------------------
 # Latents from single file
 # ----------------------------------------------------------------------
-blob = torch.load('../spender_desi_noise_6latent_space.pt', map_location='cpu')
-theta = blob['latents'].float()   # [N, 6]
+blob = torch.load('../desi_noise_spender_10latent_space.pt', map_location='cpu')
+theta = blob['latents'].float()   # [N, 10]
 A = blob['A'].float() # [N, 1]
 
 print("latents shape:", theta.shape, theta.device)
@@ -84,7 +84,7 @@ NDE_theta.optimizer = torch.optim.Adam(NDE_theta.parameters(), lr=1e-3)
 NDE_theta.train_loss_history = []
 NDE_theta.valid_loss_history = []
 
-n_epoch = 1
+n_epoch = 150
 n_steps = 20
 
 scheduler = torch.optim.lr_scheduler.OneCycleLR(

@@ -1,0 +1,62 @@
+# sky-lines.txt
+#
+# Columns:
+#   wavelength (nm)  intensity  description           status
+#
+# Units:
+#   wavelength : nm
+#   intensity  : arbitrary units (set to 10 for every line)
+#
+# The status bitmask is defined as:
+#   GOOD=0            : Line is good
+#   NOT_VISIBLE=1     : Line is not typically visible in PFS (maybe too faint)
+#   BLEND=2           : Line is blended with other line(s)
+#   SUSPECT=4         : Line is of suspect quality
+#   REJECTED=8        : Line has been rejected from use in PFS
+#   BROAD=16          : Line is broader than normal
+#   BAD=65535         : Line is bad for any reason
+#
+103.382 10 OVI          0
+121.524 10 Lyα           0
+124.081 10 NV           0
+130.553 10 OI           0
+133.531 10 CII          0
+139.761 10 SiIV         0
+139.980 10 SiIV+OIV  0
+154.948 10 CIV          0
+164.040 10 HeII         0
+166.585 10 OIII         0
+185.740 10 AlIII        0
+190.873 10 CIII         0
+232.600 10 CII          0
+243.950 10 NeIV         0
+279.912 10 MgII         0
+334.679 10 NeV          0
+342.685 10 NeVI         0
+372.709 10 OII          0
+372.988 10 OII          0
+388.900 10 HI          0
+407.230 10 SII          0
+410.289 10 Hδ            0
+434.168 10 Hγ            0
+436.444 10 OIII         0
+486.268 10 Hβ            0
+493.260 10 OIII         0
+496.030 10 OIII         0
+500.824 10 OIII         0
+630.205 10 OI           0
+636.554 10 OI           0
+652.903 10 NI           0
+654.986 10 NII          0
+656.461 10 Hα            0
+658.527 10 NII          0
+671.829 10 SII          0
+673.267 10 SII          0
+393.478 10 K             0
+396.959 10 H             0
+430.561 10 G             0
+517.670 10 Mg            0
+589.560 10 Na            0
+850.036 10 CaII         0
+854.444 10 CaII         0
+866.452 10 CaII         0

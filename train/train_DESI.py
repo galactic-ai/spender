@@ -12,6 +12,7 @@ from accelerate import Accelerator
 from spender import SpectrumAutoencoder
 from spender.data import desi
 from spender.util import mem_report, resample_to_restframe
+from spender.instrument import get_emission_mask
 
 # allows one to run fp16_train.py from home directory
 import sys;sys.path.insert(1, './')
@@ -155,6 +156,11 @@ def _losses(model,
            ):
 
     spec, w, z = batch
+
+    if args.emission_mask:
+        em_masks = get_emission_mask(model.wave_obs, z)
+        w[em_masks] = 0
+
     # need the latents later on if similarity=True
     m = base(model)
     s = m.encode(spec)
@@ -392,6 +398,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--similarity", help="add similarity loss", action="store_true")
     parser.add_argument("-c", "--consistency", help="add consistency loss", action="store_true")
     parser.add_argument("-C", "--clobber", help="continue training of existing model", action="store_true")
+    parser.add_argument('-e', '--emission_mask', help='mask out emission lines while training', action="store_true")
     parser.add_argument("-v", "--verbose", help="verbose printing", action="store_true")
     args = parser.parse_args()
 

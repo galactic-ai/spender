@@ -102,13 +102,25 @@ def get_emission_mask(
         Boolean mask.  Shape matches the broadcasted shape of
         ``wave_obs`` and ``z`` (see notes below).
     """
-    if isinstance(z, float) or (isinstance(z, torch.Tensor) and z.ndim == 0):
-        # single spectrum → keep mask 1‑D
-        mask = torch.zeros_like(wave_obs, dtype=torch.bool)
-    else:
+    device = wave_obs.device
+
+    if isinstance(z, float) or isinstance(z, int):
+        z = torch.tensor(z, device=device)
+    elif isinstance(z, torch.Tensor):
         # many spectra → 2‑D mask
-        z = z.to(wave_obs.device)
-        mask = torch.zeros((z.numel(), wave_obs.size(0)), dtype=torch.bool)
+        z = z.to(device)
+    
+    if isinstance(z, torch.Tensor) and z.ndim == 0:
+        # single spectrum → 1-D
+        mask = torch.zeros_like(wave_obs, dtype=torch.bool, device=device)
+    else:
+        # many spectra → 2-D
+        z = z.reshape(-1)  # ensure 1-D
+        mask = torch.zeros(
+            (z.numel(), wave_obs.size(0)),
+            dtype=torch.bool,
+            device=device,
+        )
 
     lines = _EMISSION_LINES[_EMISSION_LINES["intensity"] > min_intensity]
 

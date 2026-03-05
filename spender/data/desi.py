@@ -108,7 +108,7 @@ class DESI(Instrument):
             tag = "Variable"
         classname = cls.__mro__[0].__name__
         filename = f"{classname}{tag}*_*.pkl"
-        batches = glob.glob(dir + "/" + filename)
+        batches = sorted(glob.glob(dir + "/" + filename))
 
         NBATCH = len(batches)
         train_batches = batches[: int(0.7 * NBATCH)]

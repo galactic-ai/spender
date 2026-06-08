@@ -16,7 +16,7 @@ ZMAX="${ZMAX:-0.6}"
 BATCH="${BATCH:-512}"
 EXTRA="${EXTRA:-}"                  # e.g. EXTRA='-e' for the continuum (emission-masked) run
 
-set -euo pipefail
+set -eo pipefail
 
 # environment (mirrors your manual steps)
 cd /work/11006/nikhilgaruda/ls6/python-envs/spender_venv
@@ -24,7 +24,7 @@ source bin/activate
 cd /work/11006/nikhilgaruda/ls6/research/spender
 mkdir -p logs
 
-echo "host $(hostname)  gpu $CUDA_VISIBLE_DEVICES"
+echo "host $(hostname)  gpu ${CUDA_VISIBLE_DEVICES:-NA}"
 nvidia-smi -L || true
 echo "RUN: latents=$LAT data=$DATADIR tag=$TAG zmax=$ZMAX batch=$BATCH out=$OUT extra='$EXTRA'"
 

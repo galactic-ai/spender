@@ -13,7 +13,7 @@
 # Params passed in via:  sbatch --export=ALL,LAT=..,DATADIR=..,TAG=..,OUT=..
 : "${LAT:?set LAT}"; : "${DATADIR:?set DATADIR}"; : "${TAG:?set TAG}"; : "${OUT:?set OUT}"
 ZMAX="${ZMAX:-0.6}"
-BATCH="${BATCH:-512}"
+BATCH="${BATCH:-256}"
 EXTRA="${EXTRA:-}"                  # e.g. EXTRA='-e' for the continuum (emission-masked) run
 
 set -eo pipefail

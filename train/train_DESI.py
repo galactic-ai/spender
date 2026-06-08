@@ -399,6 +399,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--consistency", help="add consistency loss", action="store_true")
     parser.add_argument("-C", "--clobber", help="continue training of existing model", action="store_true")
     parser.add_argument('-e', '--emission_mask', help='mask out emission lines while training', action="store_true")
+    parser.add_argument("-t", "--tag", help="data file tag to load (e.g. chunk1024 for DESI, cueprospector1024 for Cue mocks)", type=str, default="chunk1024")
     parser.add_argument("-v", "--verbose", help="verbose printing", action="store_true")
     args = parser.parse_args()
 
@@ -422,8 +423,8 @@ if __name__ == "__main__":
         print ("Restframe:\t{:.0f} .. {:.0f} A ({} bins)".format(lmbda_min, lmbda_max, bins))
 
     # data loaders
-    trainloaders = [ inst.get_data_loader(args.dir, tag="chunk1024", which="train",  batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
-    validloaders = [ inst.get_data_loader(args.dir,  tag="chunk1024", which="valid", batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
+    trainloaders = [ inst.get_data_loader(args.dir, tag=args.tag, which="train",  batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
+    validloaders = [ inst.get_data_loader(args.dir,  tag=args.tag, which="valid", batch_size=args.batch_size, shuffle=True, shuffle_instance=True) for inst in instruments ]
 
     # get augmentation function
     if args.augmentation:

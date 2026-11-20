@@ -36,6 +36,10 @@ dependencies = [
     "datasets>=4.0",
     "pyarrow",
     "fsspec",
+    "h5py",
+    "requests",
+    "tqdm",
+    "desitarget",
 ]
 
 [project.urls]

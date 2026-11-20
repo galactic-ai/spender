@@ -53,43 +53,43 @@ def _download_one(session: requests.Session,
         except (TypeError, ValueError):
             total_size = None 
         
-        # offset
-        offset = tmp.stat().st_size if tmp.exists() else 0
-        headers = {}
+    # offset
+    offset = tmp.stat().st_size if tmp.exists() else 0
+    headers = {}
 
-        if offset and supports_range:
-            headers["Range"] = f"bytes={offset}-"
+    if offset and supports_range:
+        headers["Range"] = f"bytes={offset}-"
         
-        try:
-            with session.get(url, stream=True, timeout=session.request_timeout, headers=headers) as r:
-                # If we asked for a range but got 200, server ignored Range -> restart from scratch
-                if headers.get("Range") and r.status_code == 200:
-                    offset = 0  # restart clean
-                elif headers.get("Range") and r.status_code not in (200, 206):
-                    r.raise_for_status()
+    try:
+        with session.get(url, stream=True, timeout=session.request_timeout, headers=headers) as r:
+            # If we asked for a range but got 200, server ignored Range -> restart from scratch
+            if headers.get("Range") and r.status_code == 200:
+                offset = 0  # restart clean
+            elif headers.get("Range") and r.status_code not in (200, 206):
+                r.raise_for_status()
 
-                mode = "ab" if offset else "wb"
-                with open(tmp, mode) as f:
-                    for buf in r.iter_content(chunk_size=chunk):
-                        if buf:
-                            f.write(buf)
+            mode = "ab" if offset else "wb"
+            with open(tmp, mode) as f:
+                for buf in r.iter_content(chunk_size=chunk):
+                    if buf:
+                        f.write(buf)
 
-            # Optional integrity check: if total size known, verify final length
-            if total_size is not None:
-                final_size = tmp.stat().st_size
-                if final_size != total_size:
-                    raise IOError(f"Incomplete download for {dest.name}: {final_size}/{total_size} bytes")
+        # Optional integrity check: if total size known, verify final length
+        if total_size is not None:
+            final_size = tmp.stat().st_size
+            if final_size != total_size:
+                raise IOError(f"Incomplete download for {dest.name}: {final_size}/{total_size} bytes")
 
-            tmp.replace(dest)
-            return str(dest), True
+        tmp.replace(dest)
+        return str(dest), True
 
-        except Exception:
-            # Clean up only if it's an obvious failure with no resume possiblity;
-            # keep the .part file to allow resume on the next run.
-            # Comment the next 3 lines if you prefer to always delete on failure.
-            # try:
-            #     if tmp.exists() and not supports_range:
-            #         tmp.unlink()
-            # except Exception:
-            #     pass
-            raise
+    except Exception:
+        # Clean up only if it's an obvious failure with no resume possiblity;
+        # keep the .part file to allow resume on the next run.
+        # Comment the next 3 lines if you prefer to always delete on failure.
+        # try:
+        #     if tmp.exists() and not supports_range:
+        #         tmp.unlink()
+        # except Exception:
+        #     pass
+        raise

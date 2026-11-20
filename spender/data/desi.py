@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import urllib.request
 
 import requests
@@ -225,39 +225,35 @@ class DESI(Instrument):
                 (rr[1].data['SPECTYPE'] == spectype) &              # is a galaxy according to redrock
                 (rr[1].data['Z'] < 0.8))                            # Redshift < 0.8
 
-        if target is not None: 
+        if target is not None:
             target = target.upper()
 
-            # see https://arxiv.org/pdf/2208.08518.pdf Section 2.2 for details
-            # on the bitmask
-            import desitarget # https://github.com/desihub/desitarget/
-
             if survey.lower() == "sv1":
-                from desitarget.sv1.sv1_targetmask import desi_mask
+                from desitarget.sv1.sv1_targetmask import bgs_mask, desi_mask
             elif survey.lower() == "sv2":
-                from desitarget.sv2.sv2_targetmask import desi_mask
+                from desitarget.sv2.sv2_targetmask import bgs_mask, desi_mask
             elif survey.lower() == "sv3":
-                from desitarget.sv3.sv3_targetmask import desi_mask
-            else: 
-                raise ValueError("not included in EDR") 
-            if target == 'BGS': 
-                target = 'BGS_ANY'
-            if target == 'MWS':
-                target = 'MWS_ANY'
+                from desitarget.sv3.sv3_targetmask import bgs_mask, desi_mask
+            else:
+                raise ValueError("only sv1, sv2 and sv3 are supported")
 
-            keep = keep & (desi_mask[target] > 0)
-
-            # redshift criteria for BGS and LRG. no additional criteria imposed
-            # for ELG and QSO. ELG requires OII flux SNR; QSO has
-            # afterburners...
-            # see DESI Collaboration SV overview paper
             if target == "BGS":
+                # BGS Bright and Faint of Hahn et al. 2023, without the BGS AGN sample
+                bgs_bits = bgs_mask["BGS_BRIGHT"] | bgs_mask["BGS_FAINT"]
+                keep = keep & ((meta["%s_BGS_TARGET" % survey] & bgs_bits) != 0)
+                # Hahn et al. 2023 redshift success (criteria 3 and 4) and BGS range 0 < z < 0.6
                 keep = keep & (
                     (rr[1].data["ZERR"] < 0.0005 * (1.0 + rr[1].data["Z"]))
-                    & (rr[1].data["DELTACHI2"] > 40)  # low redshift error
-                )  # chi2 difference with
-            elif target == "LRG":
-                keep = keep & (rr[1].data["DELTACHI2"] > 15)  # chi2 difference with
+                    & (rr[1].data["DELTACHI2"] > 40)
+                    & (rr[1].data["Z"] > 0)
+                    & (rr[1].data["Z"] < 0.6)
+                )
+            else:
+                if target == "MWS":
+                    target = "MWS_ANY"
+                keep = keep & ((meta["%s_DESI_TARGET" % survey] & desi_mask[target]) != 0)
+                if target == "LRG":
+                    keep = keep & (rr[1].data["DELTACHI2"] > 15)
 
         # read in data
         _wave, _flux, _ivar, _mask, _res = {}, {}, {}, {}, {}
